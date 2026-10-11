@@ -35,7 +35,19 @@ elif sys.platform == "win32":
 else:
     ICON = None                         # Linux: the icon goes in the .desktop file
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+# pip travels inside the app, so Connections ▸ Install… can add pandas, numpy,
+# scipy or matplotlib to a folder of the user's own (openprocess.packages).
+PIP_DATAS, PIP_BINARIES, PIP_HIDDEN = collect_all("pip")
+
+# A package installed that way imports what it likes from the standard library
+# (matplotlib wants unittest), and PyInstaller packs only what the app imports:
+# so the whole library is listed (openprocess.packages.stdlib_modules).
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from openprocess.packages import stdlib_modules
+STDLIB = stdlib_modules()
 
 # The Code tab reads a box's source with inspect.getsource, and the algorithm
 # it calls likewise: the bundle carries every .py file of the package next to
@@ -46,9 +58,10 @@ SOURCES = [(str(path), str(pathlib.Path("openprocess") / path.relative_to(ROOT /
 analysis = Analysis(
     [str(PACKAGING / "openprocess_studio.py")],
     pathex=[str(ROOT)],
+    binaries=PIP_BINARIES,
     # Files the code opens by path at run time (the window icon, and the demo
     # exercises that File ▸ Open Demo Exercises copies to Documents).
-    datas=[(str(ROOT / "openprocess" / "gui" / "resources" / "openprocess-icon.png"),
+    datas=PIP_DATAS + [(str(ROOT / "openprocess" / "gui" / "resources" / "openprocess-icon.png"),
             "openprocess/gui/resources"),
            (str(ROOT / "openprocess" / "exercises"), "openprocess/exercises"),
            # Help ▸ Writing Exercise Packs.
@@ -60,8 +73,8 @@ analysis = Analysis(
     # listed so they are never missed.  certifi brings its certificate file
     # (PyInstaller's hook), which the update check needs to reach GitHub: the
     # bundled Python cannot use the system's.
-    hiddenimports=["openprocess.analysis.state_space_process", "certifi"]
-                  + collect_submodules("openprocess.flow.boxes"),
+    hiddenimports=["openprocess.analysis.state_space_process", "certifi", "openprocess.packages"]
+                  + collect_submodules("openprocess.flow.boxes") + PIP_HIDDEN + STDLIB,
     # Not needed by the app.  PM4Py is an optional extra (AGPL-3.0) and is
     # never bundled; the app hides its PM4Py options when it is missing.
     excludes=["pm4py", "tkinter", "pytest", "matplotlib", "numpy", "pandas", "scipy"],

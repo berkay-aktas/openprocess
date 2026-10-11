@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
 from ...flow import record as records
 from ...flow import reproducibility, snapshots
 from ...flow.library import Library
-from ...flow.runner import BLOCKED, DONE, FAILED, IDLE, RUNNING, WAITING, Cache, Result, Run, Runner
+from ...flow.runner import (BLOCKED, DONE, FAILED, IDLE, RUNNING, WAITING, Cache, Result, Run, Runner,
+                            columns_connected)
 from ...flow.types import EventLog, Figure, PetriNet, Scores, Table
 from ...flow.workflow import Edge, Workflow, group_to_python, to_python
 from .. import theme
@@ -341,7 +342,7 @@ class WorkflowPage(QWidget):
     def refresh_title(self) -> None:
         self.header.set_text(self.workflow.name, self._subtitle())
         status = self._repro
-        self.header.set_badge(status.headline, status.tone,
+        self.header.set_badge(status.short, status.tone,
                               "\n".join([status.headline] + ["· " + d for d in status.details]
                                         + ["", "Click for the record."]),
                               self.show_record)
@@ -879,7 +880,8 @@ class WorkflowPage(QWidget):
             return how_widget(result.explanation, self, result.value)
         if index == 2:
             return code_widget(spec, self)
-        settings = SettingsWidget(spec, node.settings, self.folder)
+        settings = SettingsWidget(spec, node.settings, self.folder,
+                                  columns=columns_connected(self.workflow, self.run, node))
         settings.changed.connect(lambda name, value, nid=node.id: self._setting_changed(nid, name, value))
         return settings
 

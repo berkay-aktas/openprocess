@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QFrame, QMenu, QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate,
     QVBoxLayout, QWidget,
@@ -357,6 +357,73 @@ def fitness_status(value: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+class Chip(QWidget):
+    """A small pill with a word or two in it: "not installed", "ready", "✓ correct".
+
+    Painted here rather than styled.  A label's background and corner radius
+    come from the style's box model, which polishes when it likes: the
+    downloaded app showed square chips beside round ones.  A pill must look
+    the same everywhere, so this one draws itself from its font metrics.
+    ``fill`` and ``ink`` are colours; :meth:`set_state` picks the soft tints of
+    the status colours instead (good, warning, critical, or muted).
+    """
+
+    def __init__(self, text: str = "", fill=None, ink=None, parent=None) -> None:
+        super().__init__(parent)
+        self._text = text
+        self._fill = QColor(fill) if fill is not None else QColor(style.tokens().text_muted)
+        self._ink = QColor(ink) if ink is not None else QColor("white")
+        font = QFont(self.font())
+        font.setPixelSize(11)
+        font.setWeight(QFont.DemiBold)
+        self.setFont(font)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+    def text(self) -> str:
+        return self._text
+
+    def setText(self, text: str) -> None:  # noqa: N802 - a label's name, so a chip can stand in for one
+        self._text = text
+        self.updateGeometry()
+        self.update()
+
+    def set_colours(self, fill, ink) -> None:
+        self._fill, self._ink = QColor(fill), QColor(ink)
+        self.update()
+
+    def set_state(self, state: str) -> None:
+        """The soft look of a status: a tint of its colour behind ink of the same."""
+        t = style.tokens()
+        if state == "good":
+            self.set_colours(style.qc(style.STATUS["good"], 0.13), style.STATUS["good"])
+        elif state == "warning":
+            self.set_colours(style.qc(style.STATUS["warning"], 0.25), t.text)
+        elif state == "critical":
+            self.set_colours(style.qc(style.STATUS["critical"], 0.12), style.STATUS["critical"])
+        else:
+            self.set_colours(style.qc(t.text, 0.08), t.text_secondary)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        metrics = QFontMetricsF(self.font())
+        return QSize(int(metrics.horizontalAdvance(self._text)) + 18, max(20, int(metrics.height()) + 6))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return self.sizeHint()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = rect.height() / 2
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(self._fill)
+        painter.drawRoundedRect(rect, radius, radius)
+        painter.setPen(QPen(self._ink))
+        painter.setFont(self.font())
+        painter.drawText(self.rect(), Qt.AlignCenter, self._text)
+        painter.end()
+
+
 # Activity chips
 # ---------------------------------------------------------------------------
 def paint_chips(painter: QPainter, rect: QRectF, sequence: list[tuple[str, str, str | None]],
@@ -527,6 +594,9 @@ class PageHeader(QWidget):
         text = QVBoxLayout()
         text.setSpacing(2)
         self.title = ElidedLabel(title, "pageTitle")
+        # In a row with the badge, the title keeps its natural width and only
+        # shrinks (eliding) when the header is short of space.
+        self.title.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         self.subtitle = ElidedLabel(subtitle, "pageSubtitle")
         title_row = QHBoxLayout()
         title_row.setSpacing(10)
@@ -544,30 +614,52 @@ class PageHeader(QWidget):
         layout.addLayout(self.actions)
 
     def set_badge(self, text: str, tone: str = "muted", tooltip: str = "", slot=None) -> None:
-        """A small chip beside the title ("Recorded · this run reproduces it").
-        ``tone``: good, warning, critical or muted.  Empty text hides it."""
+        """A pill beside the title ("● Reproducible"): a soft tint of the tone with
+        a dot and a few words; the full sentence is the tooltip.  ``tone``: good,
+        warning, critical or muted.  Empty text hides it.  Short of room, the
+        pill keeps only its dot (see :meth:`resizeEvent`)."""
         if self.badge is None:
             self.badge = QPushButton()
             self.badge.setObjectName("reproBadge")
             self.badge.setCursor(Qt.PointingHandCursor)
             self.badge.setFocusPolicy(Qt.NoFocus)
+            self.badge.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             self._title_row.insertWidget(1, self.badge, 0, Qt.AlignVCenter)
             self._badge_slot = None
         from . import style
-        colours = {"good": (style.STATUS["good"], "#ffffff"),
-                   "warning": (style.STATUS["warning"], "#1d1d1f"),
-                   "critical": (style.STATUS["critical"], "#ffffff"),
-                   "muted": (style.qc(style.tokens().text, 0.10).name(QColor.HexArgb), style.tokens().text_secondary)}
-        background, ink = colours.get(tone, colours["muted"])
-        self.badge.setStyleSheet(f"QPushButton#reproBadge {{ background: {background}; color: {ink}; }}")
-        self.badge.setText(text)
+        t = style.tokens()
+        ink = {"good": style.STATUS["good"], "warning": style.STATUS["warning"],
+               "critical": style.STATUS["critical"]}.get(tone, t.text_secondary)
+        tint = style.qc(ink, 0.14 if tone != "muted" else 0.08).name(QColor.HexArgb)
+        # The whole rule here, not only the colours: on macOS a button whose own
+        # sheet sets a background but no border falls back to a square frame.
+        self.badge.setStyleSheet(
+            f"QPushButton#reproBadge {{ background: {tint}; color: {ink}; border: none; border-radius: 11px; "
+            f"min-height: 22px; max-height: 22px; padding: 0 11px 0 9px; font-size: 11px; font-weight: 600; }}"
+            f"QPushButton#reproBadge:hover {{ background: {style.qc(ink, 0.22 if tone != 'muted' else 0.14).name(QColor.HexArgb)}; }}")
+        self._badge_text = text
         self.badge.setToolTip(tooltip)
         self.badge.setVisible(bool(text))
+        self._fit_badge()
         if self._badge_slot is not None:
             self.badge.clicked.disconnect(self._badge_slot)
         self._badge_slot = slot
         if slot is not None:
             self.badge.clicked.connect(slot)
+
+    def _fit_badge(self) -> None:
+        """The pill's words when there is room for them beside the title, else its dot alone."""
+        if self.badge is None or not getattr(self, "_badge_text", ""):
+            return
+        metrics = self.badge.fontMetrics()
+        full = f"●  {self._badge_text}"
+        needed = metrics.horizontalAdvance(full) + 24 + self.title.sizeHint().width() + self._title_row.spacing()
+        room = self._title_row.contentsRect().width() if self._title_row.contentsRect().width() > 0 else needed
+        self.badge.setText(full if needed <= room else "●")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_badge()
 
     def set_back(self, text: str, slot) -> None:
         """A link above the title, back to where this page was opened from

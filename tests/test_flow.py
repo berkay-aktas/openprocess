@@ -207,6 +207,56 @@ def test_a_failing_box_stays_in_its_box():
     assert run.status(after) == "idle" and "failed" in run.result(after).message
 
 
+def test_a_column_setting_lists_the_connected_tables_columns():
+    """``x: Column = ""`` is a setting (a plain string to the function), and the
+    app lists the columns of the tables connected to the box once they have run."""
+    from openprocess.flow.runner import columns_connected
+    from openprocess.flow.types import Column, Table
+
+    @box
+    def table() -> Table:
+        return Table("t", ["fitness", "precision"], [[1, 2]])
+
+    @box
+    def pick(tables: list[Table] = (), x: Column = "") -> Table:
+        return Table("p", [x or "all"], [])
+
+    spec = pick.spec
+    assert [p.name for p in spec.inputs] == ["tables"] and [s.kind for s in spec.settings] == ["column"]
+    assert spec.settings[0].coerce("fitness") == "fitness" and spec.settings[0].default == ""
+    wf = Workflow("columns")
+    t, p = wf.add(table), wf.add(pick)
+    wf.connect(t, p)
+    assert columns_connected(wf, None, p) == []                      # not run yet
+    run = Runner().run(wf)
+    assert run.status(p) == "done"
+    assert columns_connected(wf, run, p) == ["fitness", "precision"] and columns_connected(wf, run, t) == []
+
+
+def test_a_box_with_nothing_plugged_in_waits_rather_than_fails():
+    """Every input optional and none connected (Plot, just added): idle with a
+    hint about what to connect, not a red Failed with a traceback.  A box with
+    no inputs at all still runs."""
+    @box
+    def make() -> PetriNet:
+        return PetriNet()
+
+    @box
+    def gather(nets: list[PetriNet] = (), more: list[PetriNet] = ()) -> PetriNet:
+        if not nets and not more:
+            raise ValueError("nothing to gather")
+        return PetriNet()
+
+    wf = Workflow("plug")
+    g = wf.add(gather)
+    run = Runner().run(wf)
+    assert run.status(g) == "idle" and run.result(g).message == "Connect nets or more"
+    m = wf.add(make)
+    wf.connect(m, g)
+    run = Runner().run(wf)
+    assert run.status(m) == "done" and run.status(g) == "done"
+
+
 def test_a_box_without_its_input_waits_with_a_message():
     wf = Workflow("waiting")
     q = wf.add(check_fit)
@@ -580,6 +630,7 @@ def test_reproducibility_status_follows_the_record_and_the_run(tmp_path):
     (tmp_path / "orders.log.txt").write_text("[<a,b>^9]", encoding="utf-8")
     status = reproducibility.status(wf, record, run, tmp_path)
     assert status.state == "changed" and status.headline == "Recorded · 1 change since" and "has changed" in status.details[0]
+    assert status.short == "1 change since"
     again = runner.run(wf)                               # the changed log gives another model
     status = reproducibility.status(wf, record, again, tmp_path)
     assert status.state == "differs" and status.tone == "critical"
