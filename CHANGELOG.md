@@ -42,6 +42,22 @@ notice, not how it was done. Versions before 0.7.0 were released as CPNpy.
 - A folder's own boxes keep working when the folder is moved, copied or
   imported: a box is found by its function name in `boxes/` when its old id
   no longer matches.
+- **Plot's *x* and *y* draw what they say.** Set them and the figure shows
+  column *y* of the connected table against column *x*, bars when *x* holds
+  names (a model per bar) and a line when it holds numbers, whatever else is
+  connected. Before, scores plugged into the box always gave their bars and
+  the two settings changed nothing. A column a table lacks is named in the
+  error, with the columns it has.
+- **The process map fits the window.** On the Summary page the map took the
+  drawing's own height, up to three quarters of the screen, and the page
+  scrolled; it now takes the room the window has below the tiles, and the
+  map fits itself to it.
+- A formula in a worksheet that wraps over two lines is typeset as one
+  formula; before, the words between it and the next formula were taken for
+  maths ("andthenetN"). A property's ⓘ card no longer scrolls by a few
+  pixels. On Windows and Linux the menu bar follows dark mode.
+- The README's screenshots show this version, made from the app itself by
+  `docs/make_screenshots.py`.
 
 ## 0.10.6
 
